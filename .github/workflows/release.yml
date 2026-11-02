@@ -1,0 +1,21 @@
+name: Release
+
+# Only tags and manual runs, never pull requests: this runs on a Mac that holds the signing keys.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: [self-hosted, macOS, oskgn]
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - run: ./release.sh
+        env:
+          GH_TOKEN: ${{ github.token }}

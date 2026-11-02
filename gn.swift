@@ -1,4 +1,5 @@
 import AppKit
+import Sparkle
 import SwiftUI
 import UserNotifications
 
@@ -44,6 +45,7 @@ struct Item: Identifiable {
     let labels: [String]
     let review: String?
     let checks: String?
+    let avatar: String?
     let kind: Kind
     var id: String { url }
 }
@@ -102,8 +104,9 @@ struct Search: Decodable {
         struct Commit: Decodable { let statusCheckRollup: Rollup? }
         struct Rollup: Decodable { let state: String }
         struct Labels: Decodable { let nodes: [Repo.Label] }
+        struct Author: Decodable { let avatarUrl: String }
         let number: Int, title: String, url: String, updatedAt: Date, repository: Repo, labels: Labels
-        let isDraft: Bool?, reviewDecision: String?, commits: Commits?
+        let isDraft: Bool?, reviewDecision: String?, commits: Commits?, author: Author?
     }
     struct Result: Decodable { let nodes: [Node] }
     let data: [String: Result]
@@ -141,6 +144,43 @@ struct RepoInfo: Decodable {
 
 struct Fail: Error { let message: String }
 
+// A notification's picture in GitHub's terms: what it's about, with a badge for what happened.
+struct Icon {
+    var avatar: String? = nil
+    let glyph: String, color: String
+    var badge: (glyph: String, color: String)? = nil
+}
+
+// Primer's emphasis colors, the ones GitHub draws these states in.
+let success = "#238636", danger = "#da3633", attention = "#9e6a03", neutral = "#656c76", accent = "#1f6feb"
+
+// Primer Octicons 19.42 (MIT), the icons GitHub itself uses, by name; the 24 px ones draw subjects, the 16 px ones badges.
+let octicons: [String: String] = [
+    "check-circle-fill": "M1 12C1 5.925 5.925 1 12 1s11 4.925 11 11-4.925 11-11 11S1 18.075 1 12Zm16.28-2.72a.751.751 0 0 0-.018-1.042.751.751 0 0 0-1.042-.018l-5.97 5.97-2.47-2.47a.751.751 0 0 0-1.042.018.751.751 0 0 0-.018 1.042l3 3a.75.75 0 0 0 1.06 0Z",
+    "x-circle-fill": "M1 12C1 5.925 5.925 1 12 1s11 4.925 11 11-4.925 11-11 11S1 18.075 1 12Zm8.036-4.024a.751.751 0 0 0-1.042.018.751.751 0 0 0-.018 1.042L10.939 12l-2.963 2.963a.749.749 0 0 0 .326 1.275.749.749 0 0 0 .734-.215L12 13.06l2.963 2.964a.75.75 0 0 0 1.061-1.06L13.061 12l2.963-2.964a.749.749 0 0 0-.326-1.275.749.749 0 0 0-.734.215L12 10.939Z",
+    "issue-opened": "M12 1c6.075 0 11 4.925 11 11s-4.925 11-11 11S1 18.075 1 12 5.925 1 12 1ZM2.5 12a9.5 9.5 0 0 0 9.5 9.5 9.5 9.5 0 0 0 9.5-9.5A9.5 9.5 0 0 0 12 2.5 9.5 9.5 0 0 0 2.5 12Zm9.5 2a2 2 0 1 1-.001-3.999A2 2 0 0 1 12 14Z",
+    "server": "M10.75 6.5a.75.75 0 0 0 0 1.5h6.5a.75.75 0 0 0 0-1.5h-6.5ZM6 7.25a.75.75 0 0 1 .75-.75h.5a.75.75 0 0 1 0 1.5h-.5A.75.75 0 0 1 6 7.25Zm4 9a.75.75 0 0 1 .75-.75h6.5a.75.75 0 0 1 0 1.5h-6.5a.75.75 0 0 1-.75-.75Zm-3.25-.75a.75.75 0 0 0 0 1.5h.5a.75.75 0 0 0 0-1.5h-.5Z M3.25 2h17.5c.966 0 1.75.784 1.75 1.75v7c0 .372-.116.716-.314 1 .198.284.314.628.314 1v7a1.75 1.75 0 0 1-1.75 1.75H3.25a1.75 1.75 0 0 1-1.75-1.75v-7c0-.358.109-.707.314-1a1.741 1.741 0 0 1-.314-1v-7C1.5 2.784 2.284 2 3.25 2Zm0 10.5a.25.25 0 0 0-.25.25v7c0 .138.112.25.25.25h17.5a.25.25 0 0 0 .25-.25v-7a.25.25 0 0 0-.25-.25Zm0-1.5h17.5a.25.25 0 0 0 .25-.25v-7a.25.25 0 0 0-.25-.25H3.25a.25.25 0 0 0-.25.25v7c0 .138.112.25.25.25Z",
+    "git-pull-request": "M16 19.25a3.25 3.25 0 1 1 6.5 0 3.25 3.25 0 0 1-6.5 0Zm-14.5 0a3.25 3.25 0 1 1 6.5 0 3.25 3.25 0 0 1-6.5 0Zm0-14.5a3.25 3.25 0 1 1 6.5 0 3.25 3.25 0 0 1-6.5 0ZM4.75 3a1.75 1.75 0 1 0 .001 3.501A1.75 1.75 0 0 0 4.75 3Zm0 14.5a1.75 1.75 0 1 0 .001 3.501A1.75 1.75 0 0 0 4.75 17.5Zm14.5 0a1.75 1.75 0 1 0 .001 3.501 1.75 1.75 0 0 0-.001-3.501Z M13.405 1.72a.75.75 0 0 1 0 1.06L12.185 4h4.065A3.75 3.75 0 0 1 20 7.75v8.75a.75.75 0 0 1-1.5 0V7.75a2.25 2.25 0 0 0-2.25-2.25h-4.064l1.22 1.22a.75.75 0 0 1-1.061 1.06l-2.5-2.5a.75.75 0 0 1 0-1.06l2.5-2.5a.75.75 0 0 1 1.06 0ZM4.75 7.25A.75.75 0 0 1 5.5 8v8A.75.75 0 0 1 4 16V8a.75.75 0 0 1 .75-.75Z",
+    "check": "M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z",
+    "x": "M3.72 3.72a.75.75 0 0 1 1.06 0L8 6.94l3.22-3.22a.749.749 0 0 1 1.275.326.749.749 0 0 1-.215.734L9.06 8l3.22 3.22a.749.749 0 0 1-.326 1.275.749.749 0 0 1-.734-.215L8 9.06l-3.22 3.22a.751.751 0 0 1-1.042-.018.751.751 0 0 1-.018-1.042L6.94 8 3.72 4.78a.75.75 0 0 1 0-1.06Z",
+    "eye": "M8 2c1.981 0 3.671.992 4.933 2.078 1.27 1.091 2.187 2.345 2.637 3.023a1.62 1.62 0 0 1 0 1.798c-.45.678-1.367 1.932-2.637 3.023C11.67 13.008 9.981 14 8 14c-1.981 0-3.671-.992-4.933-2.078C1.797 10.83.88 9.576.43 8.898a1.62 1.62 0 0 1 0-1.798c.45-.677 1.367-1.931 2.637-3.022C4.33 2.992 6.019 2 8 2ZM1.679 7.932a.12.12 0 0 0 0 .136c.411.622 1.241 1.75 2.366 2.717C5.176 11.758 6.527 12.5 8 12.5c1.473 0 2.825-.742 3.955-1.715 1.124-.967 1.954-2.096 2.366-2.717a.12.12 0 0 0 0-.136c-.412-.621-1.242-1.75-2.366-2.717C10.824 4.242 9.473 3.5 8 3.5c-1.473 0-2.825.742-3.955 1.715-1.124.967-1.954 2.096-2.366 2.717ZM8 10a2 2 0 1 1-.001-3.999A2 2 0 0 1 8 10Z",
+    "mention": "M8 .5a7.499 7.499 0 0 1 7.499 7.462l.002.038v1.164a2.612 2.612 0 0 1-4.783 1.454A3.763 3.763 0 0 1 8 11.776 3.776 3.776 0 1 1 11.776 8v1.164a1.112 1.112 0 0 0 2.225 0L14 8a6 6 0 1 0-3.311 5.365.75.75 0 0 1 .673 1.341A7.5 7.5 0 1 1 8 .5Zm0 5.225a2.275 2.275 0 1 0 0 4.552 2.275 2.275 0 0 0 0-4.552Z",
+    "person": "M10.561 8.073a6.005 6.005 0 0 1 3.432 5.142.75.75 0 1 1-1.498.07 4.5 4.5 0 0 0-8.99 0 .75.75 0 0 1-1.498-.07 6.004 6.004 0 0 1 3.431-5.142 3.999 3.999 0 1 1 5.123 0ZM10.5 5a2.5 2.5 0 1 0-5 0 2.5 2.5 0 0 0 5 0Z",
+    "tag": "M1 7.775V2.75C1 1.784 1.784 1 2.75 1h5.025c.464 0 .91.184 1.238.513l6.25 6.25a1.75 1.75 0 0 1 0 2.474l-5.026 5.026a1.75 1.75 0 0 1-2.474 0l-6.25-6.25A1.752 1.752 0 0 1 1 7.775Zm1.5 0c0 .066.026.13.073.177l6.25 6.25a.25.25 0 0 0 .354 0l5.025-5.025a.25.25 0 0 0 0-.354l-6.25-6.25a.25.25 0 0 0-.177-.073H2.75a.25.25 0 0 0-.25.25ZM6 5a1 1 0 1 1 0 2 1 1 0 0 1 0-2Z",
+    "file-diff": "M1 1.75C1 .784 1.784 0 2.75 0h7.586c.464 0 .909.184 1.237.513l2.914 2.914c.329.328.513.773.513 1.237v9.586A1.75 1.75 0 0 1 13.25 16H2.75A1.75 1.75 0 0 1 1 14.25Zm1.75-.25a.25.25 0 0 0-.25.25v12.5c0 .138.112.25.25.25h10.5a.25.25 0 0 0 .25-.25V4.664a.25.25 0 0 0-.073-.177l-2.914-2.914a.25.25 0 0 0-.177-.073ZM8 3.25a.75.75 0 0 1 .75.75v1.5h1.5a.75.75 0 0 1 0 1.5h-1.5v1.5a.75.75 0 0 1-1.5 0V7h-1.5a.75.75 0 0 1 0-1.5h1.5V4A.75.75 0 0 1 8 3.25Zm-3 8a.75.75 0 0 1 .75-.75h4.5a.75.75 0 0 1 0 1.5h-4.5a.75.75 0 0 1-.75-.75Z",
+    "dot-fill": "M8 4a4 4 0 1 1 0 8 4 4 0 0 1 0-8Z",
+]
+
+// Pull requests show their author, as GitHub's notification list does; runs show their result the way the Actions tab does.
+func icon(_ a: Alert, _ item: Item?) -> Icon {
+    switch a {
+    case .runPassed, .runFailed: Icon(glyph: a == .runPassed ? "check-circle-fill" : "x-circle-fill", color: a.badge.color)
+    case .runnerOnline, .runnerOffline, .jobStarted, .jobFinished: Icon(glyph: "server", color: neutral, badge: a.badge)
+    default: item?.kind.pr == false ? Icon(glyph: "issue-opened", color: success, badge: a.badge)
+        : Icon(avatar: item?.avatar, glyph: "git-pull-request", color: success, badge: a.badge)
+    }
+}
+
 // GitHub's Invertocat (Octicons mark-github). NSImage reads SVG from macOS 14.
 let githubMark = NSImage(data: Data(#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>"#.utf8))!
 
@@ -170,6 +210,41 @@ enum Alert: String, CaseIterable {
 
     // Updates fire on your own pushes and comments too, and passes and starts are routine, so they start off.
     var onByDefault: Bool { ![.updated, .jobStarted, .runPassed].contains(self) }
+
+    // Shown before the event line; the dots match the badges' colors.
+    var emoji: String {
+        switch self {
+        case .reviewRequested: "👀"
+        case .mentioned: "💬"
+        case .assigned: "👤"
+        case .labeled: "🏷️"
+        case .checksPassed, .runPassed: "✅"
+        case .checksFailed, .runFailed: "❌"
+        case .approved: "👍"
+        case .changesRequested: "📝"
+        case .updated: "🔵"
+        case .runnerOnline, .jobFinished: "🟢"
+        case .jobStarted: "🟡"
+        case .runnerOffline: "⚫️"
+        }
+    }
+
+    // GitHub's timeline icon for each event on a pull request or issue, and its runner page's dots: idle green, active yellow, offline grey.
+    var badge: (glyph: String, color: String) {
+        switch self {
+        case .reviewRequested: ("eye", neutral)
+        case .mentioned: ("mention", neutral)
+        case .assigned: ("person", neutral)
+        case .labeled: ("tag", neutral)
+        case .checksPassed, .approved, .runPassed: ("check", success)
+        case .checksFailed, .runFailed: ("x", danger)
+        case .changesRequested: ("file-diff", danger)
+        case .updated: ("dot-fill", accent)
+        case .runnerOnline, .jobFinished: ("dot-fill", success)
+        case .jobStarted: ("dot-fill", attention)
+        case .runnerOffline: ("dot-fill", neutral)
+        }
+    }
 }
 
 // Comma-separated sets in UserDefaults, so @AppStorage can hold them.
@@ -277,6 +352,7 @@ final class GitBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, Observab
     let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     let popover = NSPopover()
     let session = URLSession(configuration: .ephemeral)
+    let updater = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
     @Published var shown = Snapshot()
     @Published var refreshing = false
     var latest = Snapshot()
@@ -372,7 +448,7 @@ final class GitBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, Observab
 
     func fetchItems() async throws -> [Item] {
         let fields = "number title url updatedAt repository { nameWithOwner } labels(first: 20) { nodes { name } }"
-        let pr = "... on PullRequest { \(fields) isDraft reviewDecision commits(last: 1) { nodes { commit { statusCheckRollup { state } } } } }"
+        let pr = "... on PullRequest { \(fields) isDraft reviewDecision author { avatarUrl(size: 128) } commits(last: 1) { nodes { commit { statusCheckRollup { state } } } } }"
         let q = "{" + Kind.allCases.map {
             "\($0.rawValue): search(query: \"\($0.query)\", type: ISSUE, first: 50) { nodes { \(pr) ... on Issue { \(fields) } } }"
         }.joined(separator: " ") + "}"
@@ -381,7 +457,7 @@ final class GitBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, Observab
             (s.data[k.rawValue]?.nodes ?? []).map {
                 Item(url: $0.url, number: $0.number, title: $0.title, repo: $0.repository.nameWithOwner, updated: $0.updatedAt,
                      draft: $0.isDraft ?? false, labels: $0.labels.nodes.map(\.name), review: $0.reviewDecision,
-                     checks: $0.commits?.nodes.first?.commit.statusCheckRollup?.state, kind: k)
+                     checks: $0.commits?.nodes.first?.commit.statusCheckRollup?.state, avatar: $0.author?.avatarUrl, kind: k)
             }
         }
     }
@@ -479,13 +555,13 @@ final class GitBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, Observab
         guard UserDefaults.standard.bool(forKey: "notify") else { return }
         let muted = stored("muted"), kinds = stored("kinds")
         // The label list is its own switch: empty means off.
-        func send(_ a: Alert, _ repo: String, _ title: String, _ body: String, _ url: String) {
+        func send(_ a: Alert, _ repo: String, _ title: String, _ body: String, _ url: String, _ item: Item? = nil) {
             let alerts = setting("alerts", repo).split(separator: ",")
             guard !muted.contains(repo), !muted.contains(owner(repo)) else { return }
             if a == .labeled || alerts.contains(Substring(a.rawValue)) {
-                post(title, a.title, body, url, repo: repo)
+                post(title, "\(a.emoji) \(a.title)", body, url, repo: repo, icon: icon(a, item))
             } else if alerts.contains(Substring(a.rawValue + ":quiet")) {
-                post(title, a.title, body, url, repo: repo, quiet: true)
+                post(title, "\(a.emoji) \(a.title)", body, url, repo: repo, icon: icon(a, item), quiet: true)
             }
         }
         // Each search an issue or PR newly matches is a reason: mentioned, assigned, asked to review. Reasons notify whether or not
@@ -511,7 +587,7 @@ final class GitBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, Observab
                     a = .updated
                 } else { continue }
             } else { continue }
-            send(a, i.repo, "\(i.repo) #\(i.number)", body, url)
+            send(a, i.repo, "\(i.repo) #\(i.number)", body, url, i)
         }
         let was = Dictionary(old.runners.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         for r in new.runners where shows(r.repo) {
@@ -534,7 +610,7 @@ final class GitBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, Observab
     }
 
     // Quiet notifications skip the banner and sound and go straight to Notification Center.
-    func post(_ title: String, _ subtitle: String, _ body: String, _ url: String, repo: String = "", quiet: Bool = false) {
+    func post(_ title: String, _ subtitle: String, _ body: String, _ url: String, repo: String = "", icon: Icon? = nil, quiet: Bool = false) {
         let show = stored("content"), c = UNMutableNotificationContent()
         if show.contains("source") { c.title = title }
         if show.contains("event") { c.subtitle = subtitle }
@@ -544,17 +620,60 @@ final class GitBar: NSObject, NSApplicationDelegate, NSPopoverDelegate, Observab
         c.userInfo = ["url": url]
         // Several notifications in one poll get one click: play() does nothing while the sound is still playing.
         if UserDefaults.standard.bool(forKey: "sound"), !quiet { keyClick.play() }
-        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: UUID().uuidString, content: c, trigger: nil))
+        Task {
+            if let icon, let a = await attachment(icon) { c.attachments = [a] }
+            try? await UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: UUID().uuidString, content: c, trigger: nil))
+        }
     }
 
-    // Without permission a test would silently do nothing, so open the settings where it's granted instead.
-    func sendTest() async {
+    // macOS always puts the app icon on the left; an attachment is the only per-notification image, shown on the right.
+    // Expanded, Notification Center stretches it to the notification's width, so it's a 4:1 strip with the picture in the middle
+    // square, which is also what the thumbnail is clipped to. Notification Center moves the file into its own store, so each gets its own.
+    func attachment(_ icon: Icon) async -> UNNotificationAttachment? {
+        var avatar: NSImage?
+        if let u = icon.avatar, let (d, _) = try? await URLSession.shared.data(from: URL(string: u)!) { avatar = NSImage(data: d) }
+        func svg(_ body: String, _ box: Int) -> NSImage {
+            NSImage(data: Data(#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 \#(box) \#(box)">\#(body)</svg>"#.utf8))!
+        }
+        let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 1024, pixelsHigh: 256, bitsPerSample: 8, samplesPerPixel: 4,
+                                   hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+        let r = NSRect(x: 400, y: 16, width: 224, height: 224)
+        if let avatar {
+            NSGraphicsContext.saveGraphicsState()
+            NSBezierPath(ovalIn: r).addClip()
+            avatar.draw(in: r)
+            NSGraphicsContext.restoreGraphicsState()
+        } else {
+            svg(#"<path fill="\#(icon.color)" d="\#(octicons[icon.glyph]!)"/>"#, 24).draw(in: r)
+        }
+        // The badge sits on the picture's corner with a transparent ring cut around it, as GitHub's avatar badges do.
+        if let b = icon.badge {
+            let br = NSRect(x: r.maxX - 96, y: r.minY, width: 96, height: 96)
+            NSGraphicsContext.current!.compositingOperation = .clear
+            NSBezierPath(ovalIn: br.insetBy(dx: -10, dy: -10)).fill()
+            NSGraphicsContext.current!.compositingOperation = .sourceOver
+            svg(#"<circle cx="8" cy="8" r="8" fill="\#(b.color)"/><path transform="translate(3.5 3.5) scale(.5625)" fill="white" d="\#(octicons[b.glyph]!)"/>"#, 16).draw(in: br)
+        }
+        NSGraphicsContext.restoreGraphicsState()
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".png")
+        guard (try? rep.representation(using: .png, properties: [:])!.write(to: file)) != nil else { return nil }
+        return try? UNNotificationAttachment(identifier: "", url: file, options: [
+            UNNotificationAttachmentOptionsThumbnailClippingRectKey: CGRect(x: 0.375, y: 0, width: 0.25, height: 1).dictionaryRepresentation])
+    }
+
+    // A test of one alert borrows the first pull request or issue on hand, so the PR test shows a real author's avatar.
+    func sendTest(_ a: Alert? = nil) async {
         let c = UNUserNotificationCenter.current()
         if await c.notificationSettings().authorizationStatus == .notDetermined { _ = try? await c.requestAuthorization(options: [.alert, .sound]) }
         if await c.notificationSettings().authorizationStatus == .authorized {
-            post("osk/gn", "Test notification", "Notifications are working.", "https://github.com/notifications")
+            guard let a else { return post("osk/gn", "Test notification", "Notifications are working.", "https://github.com/notifications") }
+            let item = latest.items.first { $0.kind.pr == (a != .labeled) }
+            post("Test · \(item.map { "\($0.repo) #\($0.number)" } ?? "osk/gn")", "\(a.emoji) \(a.title)", item?.title ?? "Test notification",
+                 item?.url ?? "https://github.com/notifications", icon: icon(a, item))
         } else {
-            NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension?id=local.gitbar")!)
+            NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension?id=\(Bundle.main.bundleIdentifier!)")!)
         }
     }
 
@@ -855,8 +974,8 @@ extension View {
 
     @ViewBuilder func glassMenu() -> some View {
         if #available(macOS 26, *) {
-            // Menus ignore the glass button style, so the glass is drawn behind a borderless menu at a glass button's size.
-            menuStyle(.borderlessButton).frame(width: 24, height: 24).glassEffect(.regular.interactive(), in: .circle)
+            // The button menu style is what lets a menu take the glass button style; the borderless one draws its own pop-up button.
+            menuStyle(.button).buttonStyle(.glass).buttonBorderShape(.circle)
         } else {
             menuStyle(.borderlessButton)
         }
@@ -1442,6 +1561,11 @@ struct SettingsView: View {
                     Section("Issues") {
                         ForEach(Kind.allCases.filter { !$0.pr }, id: \.self) { Toggle($0.title, isOn: member($kinds, $0.rawValue)) }
                     }
+                    Section {
+                        Button("Check for updates…") { m.updater.checkForUpdates(nil) }
+                    } footer: {
+                        Text("Version \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev")")
+                    }
                 }
                 .formStyle(.grouped)
                 case 1: repositories
@@ -1449,7 +1573,10 @@ struct SettingsView: View {
                     Section {
                         Toggle("Notifications", isOn: $notify)
                         Toggle("Play sound", isOn: $sound).disabled(!notify)
-                        Button("Send test notification") { Task { await m.sendTest() } }
+                        Menu("Send test notification") {
+                            ForEach(Alert.allCases, id: \.self) { a in Button(a.title) { Task { await m.sendTest(a) } } }
+                        } primaryAction: { Task { await m.sendTest() } }
+                        .fixedSize()
                     }
                     Section {
                         Toggle("Source", isOn: member($content, "source")).help("Repository and number, runner, or workflow")
@@ -1458,7 +1585,7 @@ struct SettingsView: View {
                         Toggle("Group by repository", isOn: member($content, "thread")).help("Stacks each repository's notifications in Notification Center")
                         // Banners versus alerts that stay until dismissed is a per-app choice macOS keeps for itself.
                         Button("Banner or alert style…") {
-                            NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension?id=local.gitbar")!)
+                            NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension?id=\(Bundle.main.bundleIdentifier!)")!)
                         }
                     } header: {
                         Text("Contents")
@@ -1576,6 +1703,63 @@ struct NotifyRules: View {
         }
     }
 }
+
+#if TESTING
+// `./build.sh test` compiles this in and runs `gn --test`; the app itself never contains it.
+if CommandLine.arguments.dropFirst().first == "--test" {
+    // The argument domain wins over every other and is never written to disk.
+    UserDefaults.standard.setVolatileDomain(["kinds": "review,authored", "hidden": "secret,acme/hidden",
+                                             "alerts": "global", "alerts.acme": "org", "alerts.acme/web": "repo"], forName: UserDefaults.argumentDomain)
+    let now = Date()
+    func item(_ repo: String, _ n: Int, _ kind: Kind = .review, checks: String? = nil, review: String? = nil, draft: Bool = false,
+              age: TimeInterval = 0, title: String = "t") -> Item {
+        Item(url: "https://github.com/\(repo)/pull/\(n)", number: n, title: title, repo: repo, updated: now - age,
+             draft: draft, labels: [], review: review, checks: checks, avatar: nil, kind: kind)
+    }
+    func run(_ status: String, _ conclusion: String? = nil) -> Run {
+        Run(id: 1, repo: "acme/web", workflow: "CI", title: "t", branch: nil, status: status, conclusion: conclusion, url: "", updated: now, started: nil, actor: nil)
+    }
+
+    precondition([duration(-5), duration(59), duration(61), duration(3661)] == ["0s", "59s", "1m 01s", "1h 01m"])
+    precondition([ago(now - 30), ago(now - 7200), ago(now - 3 * 86400)] == ["1m", "2h", "3d"])
+    precondition(owner("acme/web") == "acme")
+    precondition(Kind.issueMentioned.query == "is:open archived:false is:issue mentions:@me")
+
+    precondition([setting("alerts", "acme/web"), setting("alerts", "acme/api"), setting("alerts", "other/x")] == ["repo", "org", "global"])
+    let shown = visible([item("acme/web", 1), item("acme/web", 1, .authored), item("acme/web", 2, .mentioned),
+                         item("secret/x", 3), item("acme/hidden", 4), item("acme/web", 5, .authored)])
+    precondition(shown.map(\.number) == [1, 5] && shown[0].kind == .review)
+
+    let groups = grouped([item("b/x", 1), item("A/x", 2), item("b/x", 3)]) { itemKey($0, .org) }
+    precondition(groups.map(\.title) == ["A", "b"] && groups[1].rows.map(\.number) == [1, 3])
+    precondition([item("a/b", 1, checks: "ERROR"), item("a/b", 1, checks: "EXPECTED"), item("a/b", 1)].map { itemKey($0, .status).title }
+                 == ["Failing", "Running", "No checks"])
+    precondition([item("a/b", 1, review: "APPROVED"), item("a/b", 1, draft: true), item("a/b", 1)].map { itemKey($0, .review).title }
+                 == ["Approved", "Draft", "Awaiting review"])
+    precondition([0, 2 * 86400, 10 * 86400, 60 * 86400].map { itemKey(item("a/b", 1, age: $0), .updated).title }
+                 == ["Today", "This week", "This month", "Older"])
+    precondition([run("in_progress"), run("queued"), run("completed", "timed_out"), run("completed", "cancelled")].map { runKey($0, .status).title }
+                 == ["Running", "Queued", "Failed", "Cancelled or skipped"])
+    precondition([Runner(repo: "a/b", name: "r", online: false, busy: true, labels: []),
+                  Runner(repo: "a/b", name: "r", online: true, busy: true, labels: [])].map { runnerKey($0, .status).title } == ["Offline", "Busy"])
+
+    precondition(Sorting.number.sort([item("b/x", 1), item("a/x", 1), item("b/x", 9)]).map { "\($0.repo)#\($0.number)" } == ["a/x#1", "b/x#9", "b/x#1"])
+    precondition(Sorting.title.sort([item("a/b", 1, title: "item 10"), item("a/b", 2, title: "item 9")]).map(\.number) == [2, 1])
+    precondition(Sorting.allCases.filter { $0.applies(toTab: 2) } == [.repo, .title])
+
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("gn-test-\(getpid())").path
+    try! FileManager.default.createDirectory(atPath: root + "/_diag/pages", withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(atPath: root) }
+    try! Data("\u{FEFF}{\"agentName\": \"mac\", \"gitHubUrl\": \"https://github.com/acme/web\"}".utf8).write(to: URL(fileURLWithPath: root + "/.runner"))
+    precondition(runnerIdentity(root)! == ("mac", "https://github.com/acme/web"))
+    try! Data("2026-10-26T08:24:47.4931120Z ##[group]Run tests\n2026-10-26T08:24:48.0000000Z ok\n2026-10-26T08:24:49.0000000Z ##[endgroup]\n".utf8)
+        .write(to: URL(fileURLWithPath: root + "/_diag/pages/1.log"))
+    precondition(liveLog(root) == ["Run tests", "ok", ""])
+
+    print("All tests passed")
+    exit(0)
+}
+#endif
 
 // build.sh runs `gn --icon file.png` to draw the app icon from the same mark: black on a white macOS icon tile.
 if CommandLine.arguments.count == 3, CommandLine.arguments[1] == "--icon" {
