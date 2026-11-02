@@ -17,7 +17,8 @@ rm -rf dist && mkdir dist
 ditto -c -k --keepParent "$APP" "$ZIP"
 # Credentials from `xcrun notarytool store-credentials oskgn`, kept in the login keychain.
 xcrun notarytool submit "$ZIP" --keychain-profile oskgn --wait
-xcrun stapler staple "$APP"
+# Given a relative path with a ":" in it, stapler crashes ("destination URL is nil"); an absolute one works.
+xcrun stapler staple "$PWD/$APP"
 rm "$ZIP" && ditto -c -k --keepParent "$APP" "$ZIP"
 
 # Prints sparkle:edSignature="…" length="…", the enclosure's attributes.
